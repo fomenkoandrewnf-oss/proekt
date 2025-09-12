@@ -1,31 +1,31 @@
-# Disrupt Design Brief App
+# Приложение для дизайн-брифа
 
-Next.js 14 scaffold for collecting design-brief data, summarising it with OpenAI and exporting the result to DOCX/PDF alongside reference images.
+Минимальный шаблон на Next.js 14 для сбора данных по ТЗ, анализа их через OpenAI и генерации референсов, а также экспорта результата в DOCX/PDF.
 
-## Setup
+## Установка и запуск
 
-1. **Install dependencies**
+1. **Установка зависимостей**
    ```bash
    npm install
    ```
-2. **Add environment variables**
-   Create `.env.local` and set your OpenAI key:
+2. **Переменные окружения**
+   Создайте файл `.env.local` и укажите ключ OpenAI:
    ```env
    OPENAI_API_KEY=sk-...
    ```
-3. **Run the development server**
+3. **Запуск в режиме разработки**
    ```bash
    npm run dev
    ```
-   The app will be available at http://localhost:3000.
+   Приложение будет доступно по адресу http://localhost:3000.
 
-## Scripts
+## Доступные команды
 
-- `npm run dev` – start Next.js in development mode
-- `npm run build` – create an optimized production build
-- `npm start` – run the production build locally
+- `npm run dev` – запуск приложения в режиме разработки
+- `npm run build` – сборка проекта для продакшена
+- `npm start` – запуск собранного проекта
 
-## Notes
+## Примечания
 
-- `.npmrc` pins the registry to npmjs.org to avoid mirror issues.
-- Never commit real API keys; `.env.local` is already ignored.
+- `.npmrc` закрепляет основной реестр npm.
+- Не коммитьте реальные API-ключи; файл `.env.local` уже добавлен в `.gitignore`.

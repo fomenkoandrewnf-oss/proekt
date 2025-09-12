@@ -27,10 +27,10 @@ export default function Page() {
   const [summary, setSummary] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<string[]>([]);
+  const [activeImage, setActiveImage] = useState<string | null>(null);
 
   const roomOptions = ['кухня-гостиная','спальня','детская','кабинет','санузел'];
-  const [selectedRooms, setSelectedRooms] = useState<string[]>(['кухня-гостиная','спальня']);
-  const [refCount, setRefCount] = useState(4);
+  const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
 
   const canDownload = !!summary;
 
@@ -49,9 +49,10 @@ export default function Page() {
 
   async function handleRefs() {
     if (!summary) { alert('Сначала получите краткое ТЗ'); return; }
+    if (!selectedRoom) { alert('Выберите помещение'); return; }
     setLoading(true);
     try {
-      const { images } = await postJSON('/api/refs', { brief: summary, rooms: selectedRooms, count: refCount });
+      const { images } = await postJSON('/api/refs', { brief: summary, rooms: [selectedRoom], count: 4 });
       setImages(images);
     } catch (e) {
       console.error(e);
@@ -149,32 +150,55 @@ export default function Page() {
 
           <hr style={{ margin:'16px 0' }} />
           <h3>Референсы по ТЗ</h3>
-          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div>
-              <label className="label">Помещения</label>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-                {roomOptions.map((r) => (
-                  <label key={r} className="badge" style={{ cursor:'pointer' }}>
-                    <input type="checkbox" checked={selectedRooms.includes(r)} onChange={(e)=>{
-                      setSelectedRooms((prev)=> e.target.checked ? [...prev, r] : prev.filter(x=>x!==r));
-                    }} /> {r}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="label">Кол-во изображений</label>
-              <input type="number" min={1} max={5} className="input" value={refCount} onChange={(e)=>setRefCount(parseInt(e.target.value||'4',10))} />
-            </div>
+          <label className="label">Помещения</label>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+            {roomOptions.map((r) => (
+              <label key={r} className="badge" style={{ cursor:'pointer', opacity: selectedRoom && selectedRoom !== r ? 0.5 : 1 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedRoom === r}
+                  disabled={!!selectedRoom && selectedRoom !== r}
+                  onChange={(e)=> setSelectedRoom(e.target.checked ? r : null)}
+                /> {r}
+              </label>
+            ))}
           </div>
           <div style={{ display:'flex', gap:12, marginTop:12 }}>
-            <button className="button" onClick={handleRefs} disabled={loading || !summary}>
+            <button className="button" onClick={handleRefs} disabled={loading || !summary || !selectedRoom}>
               {loading ? 'Генерируем…' : 'Сгенерировать референсы'}
             </button>
           </div>
           <div className="gallery" style={{ marginTop:12 }}>
-            {images.map((b64, i)=> <img key={i} src={`data:image/png;base64,${b64}`} alt={`ref-${i}`} />)}
+            {images.map((b64, i)=> (
+              <div key={i} style={{ position:'relative' }}>
+                <img
+                  src={`data:image/png;base64,${b64}`}
+                  alt={`ref-${i}`}
+                  style={{ cursor:'pointer' }}
+                  onClick={()=>setActiveImage(b64)}
+                />
+                <span className="badge" style={{ position:'absolute', top:8, left:8 }}>{i+1}</span>
+              </div>
+            ))}
           </div>
+          {activeImage && (
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50 }}>
+              <div style={{ background:'#fff', padding:20, borderRadius:12 }}>
+                <img src={`data:image/png;base64,${activeImage}`} style={{ maxWidth:'80vw', maxHeight:'80vh' }} />
+                <div style={{ display:'flex', gap:8, marginTop:12, justifyContent:'center' }}>
+                  <button className="button" onClick={()=>{
+                    const link = document.createElement('a');
+                    link.href = `data:image/png;base64,${activeImage}`;
+                    link.download = 'ref.png';
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                  }}>Скачать</button>
+                  <button className="button secondary" onClick={()=>setActiveImage(null)}>Назад</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
