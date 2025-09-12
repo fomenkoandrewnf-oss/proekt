@@ -1,0 +1,37 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fomenkoandrewnf-oss/proekt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/fomenkoandrewnf-oss/proekt/issues"
+  },
+  "homepage": "https://github.com/fomenkoandrewnf-oss/proekt#readme",
+  "type": "module",
+  "dependencies": {
+    "docx": "^9.5.1",
+    "next": "^14.2.32",
+    "openai": "^5.20.1",
+    "pdfkit": "^0.17.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.12",
+    "typescript": "5.9.2"
+  }
+}
