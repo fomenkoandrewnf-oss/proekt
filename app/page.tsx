@@ -18,7 +18,12 @@ const defaultAnswers = {
 
 async function postJSON(url: string, data: any) {
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try { message = JSON.parse(text).error || message; } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -42,8 +47,8 @@ export default function Page() {
       const { summary } = await postJSON('/api/summarize', { answers });
       setSummary(summary);
     } catch (e) {
-      console.error(e);
-      alert('Ошибка анализа ТЗ');
+      console.error('Summarize error:', e);
+      alert('Ошибка анализа ТЗ: ' + (e as Error).message);
     } finally { setLoading(false); }
   }
 
@@ -55,15 +60,20 @@ export default function Page() {
       const { images } = await postJSON('/api/refs', { brief: summary, rooms: [selectedRoom], count: 4 });
       setImages(images);
     } catch (e) {
-      console.error(e);
-      alert('Ошибка генерации референсов');
+      console.error('Refs generation error:', e);
+      alert('Ошибка генерации референсов: ' + (e as Error).message);
     } finally { setLoading(false); }
   }
 
   async function download(kind: 'docx'|'pdf') {
     if (!summary) return;
     const res = await fetch(`/api/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary, title: 'Краткое ТЗ (автогенерация)' }) });
-    if (!res.ok) { alert('Не удалось скачать файл'); return; }
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`Download ${kind} failed:`, text);
+      alert('Не удалось скачать файл: ' + text);
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

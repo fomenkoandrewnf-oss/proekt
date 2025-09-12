@@ -18,6 +18,10 @@ export async function POST(req: NextRequest) {
     const images = await generateRoomRefs(prompt, count);
     return NextResponse.json({ images });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Failed to generate images' }, { status: 500 });
+    console.error('Error generating room refs:', e);
+    return NextResponse.json(
+      { error: e?.message ?? 'Failed to generate images', stack: e?.stack },
+      { status: 500 }
+    );
   }
 }

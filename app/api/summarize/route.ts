@@ -10,6 +10,10 @@ export async function POST(req: NextRequest) {
     const summary = await summarizeBrief(answers);
     return NextResponse.json({ summary });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Failed to summarize' }, { status: 500 });
+    console.error('Error summarizing brief:', e);
+    return NextResponse.json(
+      { error: e?.message ?? 'Failed to summarize', stack: e?.stack },
+      { status: 500 }
+    );
   }
 }
