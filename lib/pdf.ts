@@ -1,11 +1,11 @@
 import PDFDocument from 'pdfkit';
 
-export async function buildPdf(summary: string, title = 'Краткое ТЗ'): Promise<Buffer> {
+export async function buildPdf(summary: string, title = 'Краткое ТЗ'): Promise<Uint8Array> {
   return await new Promise((resolve) => {
     const doc = new PDFDocument({ size: 'A4', margin: 48 });
     const chunks: Buffer[] = [];
     doc.on('data', (d) => chunks.push(d as Buffer));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('end', () => resolve(Buffer.concat(chunks) as Uint8Array));
 
     doc.fontSize(20).text(title, { underline: false });
     doc.moveDown();

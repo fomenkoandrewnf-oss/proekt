@@ -1,6 +1,6 @@
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
 
-export async function buildDocx(summary: string, title = 'Краткое ТЗ') {
+export async function buildDocx(summary: string, title = 'Краткое ТЗ'): Promise<Uint8Array> {
   const lines = summary.split('\n').map((l) => l.trim());
   const children = [] as Paragraph[];
 
@@ -29,6 +29,6 @@ export async function buildDocx(summary: string, title = 'Краткое ТЗ') 
       children
     }]
   });
-  const buffer = await Packer.toBuffer(doc);
+  const buffer = (await Packer.toBuffer(doc)) as Uint8Array;
   return buffer;
 }

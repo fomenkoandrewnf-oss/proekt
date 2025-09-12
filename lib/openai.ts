@@ -1,13 +1,18 @@
 import OpenAI from 'openai';
 
-export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function getClient() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
+  return new OpenAI({ apiKey });
+}
 
 export async function summarizeBrief(answers: any) {
   const system = `Ты — опытный дизайнер интерьеров и менеджер проектов. Сожми ответы клиента в краткое, структурированное ТЗ (макс. 1–2 страницы) с разделами: Общие данные, Стиль и атмосфера, Зонирование, Кухня‑гостиная, Спальня/детские/кабинет, Санузлы, Отделка, Технические требования, Ограничения/нельзя, Бюджет, Референсы. Пиши по делу, списками, без воды.`;
 
   const user = JSON.stringify(answers);
 
-  const res = await openai.chat.completions.create({
+  const client = getClient();
+  const res = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       { role: 'system', content: system },
@@ -21,7 +26,8 @@ export async function summarizeBrief(answers: any) {
 
 export async function generateRoomRefs(promptBase: string, count = 4) {
   // Generate reference images via Images API (returns base64 images)
-  const images = await openai.images.generate({
+  const client = getClient();
+  const images = await client.images.generate({
     model: 'gpt-image-1',
     prompt: promptBase,
     size: '1024x1024',

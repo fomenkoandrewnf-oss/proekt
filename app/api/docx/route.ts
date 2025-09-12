@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   const { summary, title } = body || {};
   if (!summary) return NextResponse.json({ error: 'No summary' }, { status: 400 });
   const buffer = await buildDocx(summary, title ?? 'Краткое ТЗ');
-  return new NextResponse(buffer, {
+  return new NextResponse(buffer as any, {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
