@@ -31,8 +31,7 @@ export async function generateRoomRefs(promptBase: string, count = 4) {
     model: 'gpt-image-1',
     prompt: promptBase,
     size: '1024x1024',
-    n: Math.min(Math.max(count, 1), 5),
-    response_format: 'b64_json'
+    n: Math.min(Math.max(count, 1), 5)
   });
   return images.data.map((d) => d.b64_json);
 }
