@@ -1,6 +1,25 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/genai';
 
 const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? 'gemini-1.5-flash';
+
+type GeminiInstance = InstanceType<typeof GoogleGenerativeAI>;
+
+type GeminiCtor = new (config: unknown) => GeminiInstance;
+
+function createClient(apiKey: string) {
+  const Ctor = GoogleGenerativeAI as unknown as GeminiCtor;
+
+  try {
+    const client = new Ctor({ apiKey });
+    if (typeof client.getGenerativeModel === 'function') {
+      return client;
+    }
+  } catch (error) {
+    // fall back to legacy constructor signature accepting the raw key string
+  }
+
+  return new Ctor(apiKey);
+}
 
 function getModel(apiKeyOverride?: string | null) {
   const apiKey = (apiKeyOverride ?? process.env.GEMINI_API_KEY ?? '').trim();
@@ -8,8 +27,26 @@ function getModel(apiKeyOverride?: string | null) {
     throw new Error('Missing GEMINI_API_KEY');
   }
 
-  const client = new GoogleGenerativeAI(apiKey);
-  return client.getGenerativeModel({ model: DEFAULT_IMAGE_MODEL });
+  const client = createClient(apiKey);
+  const modelCandidates = Array.from(new Set([
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_IMAGE_MODEL.startsWith('models/')
+      ? DEFAULT_IMAGE_MODEL.replace(/^models\//, '')
+      : `models/${DEFAULT_IMAGE_MODEL}`,
+  ]));
+
+  let lastError: unknown;
+  for (const modelName of modelCandidates) {
+    try {
+      return client.getGenerativeModel({ model: modelName });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Gemini API: не удалось инициализировать модель');
 }
 
 async function generateSingleImage(model: ReturnType<typeof getModel>, prompt: string) {
