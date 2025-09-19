@@ -2,8 +2,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? 'gemini-1.5-flash';
 
-function getModel() {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getModel(apiKeyOverride?: string | null) {
+  const apiKey = (apiKeyOverride ?? process.env.GEMINI_API_KEY ?? '').trim();
   if (!apiKey) {
     throw new Error('Missing GEMINI_API_KEY');
   }
@@ -32,9 +32,9 @@ async function generateSingleImage(model: ReturnType<typeof getModel>, prompt: s
   throw new Error('Gemini did not return image data');
 }
 
-export async function generateRoomRefs(prompt: string, count = 4) {
+export async function generateRoomRefs(prompt: string, count = 4, apiKeyOverride?: string | null) {
   const limitedCount = Math.min(Math.max(count, 1), 4);
-  const model = getModel();
+  const model = getModel(apiKeyOverride);
 
   const results: string[] = [];
   for (let i = 0; i < limitedCount; i += 1) {

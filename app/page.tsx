@@ -16,8 +16,18 @@ const defaultAnswers = {
   budget: '7–10 млн ₽ (без строительно-монтажных работ)'
 };
 
-async function postJSON(url: string, data: any) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+async function postJSON(url: string, data: any, init?: RequestInit) {
+  const headers = new Headers(init?.headers as HeadersInit | undefined);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const res = await fetch(url, {
+    ...init,
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data),
+  });
   if (!res.ok) {
     const text = await res.text();
     let message = text;
@@ -28,6 +38,7 @@ async function postJSON(url: string, data: any) {
 }
 
 export default function Page() {
+  const geminiApiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   const [answers, setAnswers] = useState<any>(defaultAnswers);
   const [summary, setSummary] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -57,7 +68,12 @@ export default function Page() {
     if (!selectedRoom) { alert('Выберите помещение'); return; }
     setLoading(true);
     try {
-      const { images } = await postJSON('/api/refs', { brief: summary, rooms: [selectedRoom], count: 4 });
+      const headers = geminiApiKey ? { 'x-gemini-api-key': geminiApiKey } : undefined;
+      const { images } = await postJSON(
+        '/api/refs',
+        { brief: summary, rooms: [selectedRoom], count: 4 },
+        headers ? { headers } : undefined,
+      );
       setImages(images);
     } catch (e) {
       console.error('Refs generation error:', e);
