@@ -6,8 +6,6 @@ export async function POST(req: NextRequest) {
   const { brief, rooms = [], count = 4 } = body || {};
   if (!brief) return NextResponse.json({ error: 'No brief' }, { status: 400 });
 
-  const apiKeyOverride = req.headers.get('x-gemini-api-key');
-
   const roomsArray = Array.isArray(rooms) ? rooms : [rooms];
   const selectedRoom = roomsArray
     .map((room) => (typeof room === 'string' ? room.trim() : ''))
@@ -20,7 +18,7 @@ export async function POST(req: NextRequest) {
   ].join('\n');
 
   try {
-    const images = await generateRoomRefs(prompt, count, apiKeyOverride);
+    const images = await generateRoomRefs(prompt, count);
     return NextResponse.json({ images });
   } catch (e: any) {
     console.error('Error generating room refs:', e);

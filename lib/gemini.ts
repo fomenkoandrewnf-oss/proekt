@@ -1,84 +1,113 @@
-import { GoogleGenerativeAI } from '@google/genai';
+const VERTEX_LOCATION = 'us-central1';
+const VERTEX_MODEL = 'imagen-3.0';
+const MAX_IMAGE_COUNT = 4;
 
-const DEFAULT_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL ?? 'gemini-1.5-flash';
-
-type GeminiInstance = InstanceType<typeof GoogleGenerativeAI>;
-
-type GeminiCtor = new (config: unknown) => GeminiInstance;
-
-function createClient(apiKey: string) {
-  const Ctor = GoogleGenerativeAI as unknown as GeminiCtor;
-
-  try {
-    const client = new Ctor({ apiKey });
-    if (typeof client.getGenerativeModel === 'function') {
-      return client;
-    }
-  } catch (error) {
-    // fall back to legacy constructor signature accepting the raw key string
-  }
-
-  return new Ctor(apiKey);
+export function generateRoomRefPrompts(prompt: string, count: number) {
+  const numericCount = Number.isFinite(count) ? Math.floor(count) : 1;
+  const limitedCount = Math.min(Math.max(numericCount, 1), MAX_IMAGE_COUNT);
+  return Array.from({ length: limitedCount }, () => prompt);
 }
 
-function getModel(apiKeyOverride?: string | null) {
-  const apiKey = (apiKeyOverride ?? process.env.GEMINI_API_KEY ?? '').trim();
-  if (!apiKey) {
-    throw new Error('Missing GEMINI_API_KEY');
-  }
+type VertexImagePrediction = {
+  bytesBase64Encoded?: string;
+  imageBytes?: string;
+  base64Encoded?: string;
+  image?: {
+    bytesBase64Encoded?: string;
+    base64Encoded?: string;
+    data?: string;
+  };
+};
 
-  const client = createClient(apiKey);
-  const modelCandidates = Array.from(new Set([
-    DEFAULT_IMAGE_MODEL,
-    DEFAULT_IMAGE_MODEL.startsWith('models/')
-      ? DEFAULT_IMAGE_MODEL.replace(/^models\//, '')
-      : `models/${DEFAULT_IMAGE_MODEL}`,
-  ]));
+type VertexImageResponse = {
+  predictions?: VertexImagePrediction[];
+  images?: Array<{
+    bytesBase64Encoded?: string;
+    imageBytes?: string;
+    base64?: string;
+  }>;
+  error?: { message?: string };
+};
 
-  let lastError: unknown;
-  for (const modelName of modelCandidates) {
-    try {
-      return client.getGenerativeModel({ model: modelName });
-    } catch (error) {
-      lastError = error;
-    }
-  }
+async function requestVertexImage(projectId: string, token: string, prompt: string) {
+  const endpoint = `https://${VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${VERTEX_LOCATION}/publishers/google/models/${VERTEX_MODEL}:generateImage`;
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('Gemini API: не удалось инициализировать модель');
-}
-
-async function generateSingleImage(model: ReturnType<typeof getModel>, prompt: string) {
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }]}],
-    generationConfig: { responseMimeType: 'image/png' },
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      instances: [{ prompt }],
+      parameters: { sampleCount: 1, mimeType: 'image/png' },
+    }),
   });
 
-  const candidates = result.response.candidates ?? [];
-  for (const candidate of candidates) {
-    const parts = candidate.content?.parts ?? [];
-    for (const part of parts) {
-      const data = (part as any)?.inlineData?.data as string | undefined;
-      if (data) {
-        return data;
-      }
+  const payloadText = await response.text();
+  if (!response.ok) {
+    let message = payloadText;
+    try {
+      const parsed = JSON.parse(payloadText);
+      message = parsed?.error?.message ?? message;
+    } catch {}
+    throw new Error(`Vertex AI image generation failed: ${message}`);
+  }
+
+  let payload: VertexImageResponse;
+  try {
+    payload = JSON.parse(payloadText) as VertexImageResponse;
+  } catch (error) {
+    throw new Error('Vertex AI image generation returned invalid JSON');
+  }
+
+  const predictions = payload.predictions ?? [];
+  for (const prediction of predictions) {
+    const base64 =
+      prediction?.bytesBase64Encoded ??
+      prediction?.imageBytes ??
+      prediction?.base64Encoded ??
+      prediction?.image?.bytesBase64Encoded ??
+      prediction?.image?.base64Encoded ??
+      prediction?.image?.data;
+    if (typeof base64 === 'string' && base64.trim()) {
+      return base64;
     }
   }
 
-  throw new Error('Gemini did not return image data');
-}
-
-export async function generateRoomRefs(prompt: string, count = 4, apiKeyOverride?: string | null) {
-  const limitedCount = Math.min(Math.max(count, 1), 4);
-  const model = getModel(apiKeyOverride);
-
-  const results: string[] = [];
-  for (let i = 0; i < limitedCount; i += 1) {
-    // Gemini currently возвращает одно изображение за запрос, поэтому вызываем модель несколько раз
-    const image = await generateSingleImage(model, prompt);
-    results.push(image);
+  const images = payload.images ?? [];
+  for (const image of images) {
+    const base64 = image?.bytesBase64Encoded ?? image?.imageBytes ?? image?.base64;
+    if (typeof base64 === 'string' && base64.trim()) {
+      return base64;
+    }
   }
 
-  return results;
+  throw new Error('Vertex AI did not return image data');
+}
+
+export async function generateRoomRefs(prompt: string, count = 4) {
+  const token = (process.env.GOOGLE_VERTEX_TOKEN ?? '').trim();
+  if (!token) {
+    throw new Error('Missing GOOGLE_VERTEX_TOKEN');
+  }
+
+  const projectId =
+    (process.env.GOOGLE_VERTEX_PROJECT_ID ??
+      process.env.GOOGLE_CLOUD_PROJECT ??
+      process.env.GCLOUD_PROJECT ??
+      process.env.PROJECT_ID ??
+      '').trim();
+
+  if (!projectId) {
+    throw new Error('Missing GOOGLE_VERTEX_PROJECT_ID');
+  }
+
+  const prompts = generateRoomRefPrompts(prompt, count);
+
+  const images = await Promise.all(
+    prompts.map((promptText) => requestVertexImage(projectId, token, promptText))
+  );
+
+  return images;
 }
