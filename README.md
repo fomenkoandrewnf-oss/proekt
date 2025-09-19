@@ -1,6 +1,6 @@
 # Приложение для дизайн-брифа
 
-Минимальный шаблон на Next.js 14 для сбора данных по ТЗ, анализа их через OpenAI и генерации референсов через Vertex AI Images (Imagen 3), а также экспорта результата в DOCX/PDF.
+Минимальный шаблон на Next.js 14 для сбора данных по ТЗ, анализа их через OpenAI и генерации референсов через Gemini 2.5 Flash Image, а также экспорта результата в DOCX/PDF.
 
 ## Установка и запуск
 
@@ -9,11 +9,11 @@
    npm install
    ```
 2. **Переменные окружения**
-   Создайте файл `.env.local` и укажите ключи OpenAI и Vertex AI:
+   Создайте файл `.env.local` и укажите ключи OpenAI и Gemini API:
    ```env
    OPENAI_API_KEY=sk-...
-   GOOGLE_VERTEX_PROJECT_ID=...
-   GOOGLE_VERTEX_TOKEN=...
+   GEMINI_API_KEY=...
+   GEMINI_IMAGE_MODEL=gemini-2.5-flash-image-preview # (опционально, значение по умолчанию)
    ```
 3. **Запуск в режиме разработки**
    ```bash
