@@ -145,14 +145,17 @@ export default function Page() {
             <button className="button" onClick={handleSummarize} disabled={loading}>
               {loading ? 'Анализ…' : 'Собрать краткое ТЗ (GPT)'}
             </button>
-            <span className="badge">API ключ берётся из .env.local</span>
+            <span className="badge">API ключи берутся из .env.local</span>
           </div>
         </div>
 
         <div className="card">
           <h2>Краткое ТЗ</h2>
-          <p className="hint">Можно скачать в .docx или .pdf</p>
+          <p className="hint">Можно скачать в .docx или .pdf. Максимальная длина — 1000 символов.</p>
           <div style={{ whiteSpace:'pre-wrap', background:'#fafafa', border:'1px solid #eee', borderRadius:12, padding:12, minHeight:220 }}>{briefPreview}</div>
+          {summary && (
+            <div style={{ marginTop:8 }} className="hint">{summary.length} / 1000 символов</div>
+          )}
           <div style={{ display:'flex', gap:8, marginTop:12 }}>
             <button className="button secondary" disabled={!canDownload} onClick={()=>download('docx')}>Скачать .docx</button>
             <button className="button secondary" disabled={!canDownload} onClick={()=>download('pdf')}>Скачать .pdf</button>

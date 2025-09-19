@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateRoomRefs } from '@/lib/openai';
+import { generateRoomRefs } from '@/lib/gemini';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { brief, rooms = [], count = 4 } = body || {};
   if (!brief) return NextResponse.json({ error: 'No brief' }, { status: 400 });
 
-  const roomList = (rooms as string[]).length ? (rooms as string[]).join(', ') : 'квартира, кухня-гостиная, спальня';
+  const roomsArray = Array.isArray(rooms) ? rooms : [rooms];
+  const selectedRoom = roomsArray
+    .map((room) => (typeof room === 'string' ? room.trim() : ''))
+    .filter(Boolean)[0] ?? 'помещение';
   const prompt = [
-    `Фотореалистичные референсы интерьеров (${roomList}) в стиле из ТЗ. Чистые ракурсы, естественный свет, продвинутая композиция, высокий уровень отделки. Детали и палитра строго по ТЗ ниже.`,
+    `Фотореалистичный референс интерьера (${selectedRoom}) в стиле из ТЗ. Чистый ракурс, естественный свет, продвинутая композиция, высокий уровень отделки. Детали и палитра строго по ТЗ ниже.`,
     '',
     'ТЗ:',
     brief,

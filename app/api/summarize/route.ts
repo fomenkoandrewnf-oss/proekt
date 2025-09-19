@@ -7,8 +7,12 @@ export async function POST(req: NextRequest) {
   if (!answers) return NextResponse.json({ error: 'No answers' }, { status: 400 });
 
   try {
-    const summary = await summarizeBrief(answers);
-    return NextResponse.json({ summary });
+    const rawSummary = await summarizeBrief(answers);
+    const trimmed = rawSummary.trim();
+    const limited = trimmed.length > 1000
+      ? `${trimmed.slice(0, 997).trimEnd()}...`
+      : trimmed;
+    return NextResponse.json({ summary: limited });
   } catch (e: any) {
     console.error('Error summarizing brief:', e);
     return NextResponse.json(
