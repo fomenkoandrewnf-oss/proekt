@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { summarizeBrief } from '@/lib/openai';
+import { saveSubmission } from '@/lib/storage';
+import type { BriefFormData } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { answers } = body;
-  if (!answers) return NextResponse.json({ error: 'No answers' }, { status: 400 });
+  const form = body?.form as BriefFormData | undefined;
+  if (!form) return NextResponse.json({ error: 'No form data' }, { status: 400 });
 
   try {
-    const rawSummary = await summarizeBrief(answers);
-    const trimmed = rawSummary.trim();
-    const limited = trimmed.length > 1000
-      ? `${trimmed.slice(0, 997).trimEnd()}...`
-      : trimmed;
-    return NextResponse.json({ summary: limited });
+    const summary = await summarizeBrief(form);
+    await saveSubmission(form, summary, form.plan ?? undefined);
+    return NextResponse.json({ summary });
   } catch (e: any) {
     console.error('Error summarizing brief:', e);
     return NextResponse.json(
