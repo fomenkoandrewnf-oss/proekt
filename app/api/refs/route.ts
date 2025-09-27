@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateFromPlan, generateImages } from '@/lib/gemini';
+import { generateRoomRefs, type InlineImage } from '@/lib/gemini';
 import { getPlanBinary } from '@/lib/plans';
 import type { RoomRefRequest } from '@/lib/types';
 
 const MAX_VARIANTS = 4;
+const VARIANT_HINTS = [
+  'Сделай акцент на естественном освещении и мягкой палитре.',
+  'Добавь выразительный акцентный цвет и арт-детали.',
+  'Сфокусируйся на функциональности, хранении и проходах.',
+  'Предложи смелую композицию со светом и мебелью.',
+];
 
 function buildPrompt({ room, style, materials, constraints }: RoomRefRequest) {
   const styleTags = style.tags.join(', ');
@@ -17,75 +23,32 @@ function buildPrompt({ room, style, materials, constraints }: RoomRefRequest) {
     room.notes ? `Особые требования: ${room.notes}.` : '',
     constraints.housingType ? `Тип жилья: ${constraints.housingType}.` : '',
     constraints.finish ? `Отделка: ${constraints.finish}.` : '',
-    constraints.hasScale ? 'На плане есть масштаб, сохраняй пропорции и реальные размеры.' : 'Масштаб неизвестен — ориентируйся по площади и пропорциям.',
+    constraints.hasScale
+      ? 'На плане есть масштаб — соблюдай реальные пропорции и ширину проходов.'
+      : 'Масштаб точный неизвестен — соблюдай площади и логичную расстановку.',
     constraints.scaleNote ? `Примечание к масштабу: ${constraints.scaleNote}.` : '',
-    'Сгенерируй 4 фотореалистичных варианта (A–D) одного помещения. Соблюдай проходы и логику жилого интерьера.',
+    'Сгенерируй фотореалистичные варианты для дизайн-проекта.',
   ]
     .filter(Boolean)
     .join(' ');
 }
 
-function coerceBase64(value: any) {
-  if (!value) return undefined;
-  if (typeof value === 'string') {
-    return value.trim() || undefined;
-  }
-  if (typeof value === 'object') {
-    if (value.inlineData?.data) return value.inlineData.data.trim() || undefined;
-    if (value.image?.inlineData?.data) return value.image.inlineData.data.trim() || undefined;
-    if (value.b64_json) return String(value.b64_json).trim() || undefined;
-    if (value.bytesBase64Encoded) return String(value.bytesBase64Encoded).trim() || undefined;
-    if (Array.isArray(value.parts)) {
-      for (const part of value.parts) {
-        const nested = coerceBase64(part);
-        if (nested) return nested;
-      }
-    }
-  }
-  return undefined;
+function generateRoomRefPrompts(base: string, count: number) {
+  const total = Math.min(Math.max(Math.floor(count) || 1, 1), MAX_VARIANTS);
+  return Array.from({ length: total }, (_, index) => {
+    const hint = VARIANT_HINTS[index] ?? 'Предложи альтернативное решение в том же стиле.';
+    const label = String.fromCharCode(65 + index);
+    return `${base}\n\nВариант ${label}: ${hint}`;
+  });
 }
 
-function extractFromVision(response: any) {
-  const result: string[] = [];
-  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
-  for (const candidate of candidates) {
-    const parts = Array.isArray(candidate?.content?.parts)
-      ? candidate.content.parts
-      : Array.isArray(candidate?.parts)
-      ? candidate.parts
-      : [];
-    for (const part of parts) {
-      const base64 = coerceBase64(part);
-      if (base64) {
-        result.push(base64);
-      }
-    }
-  }
-  return result;
-}
-
-function extractFromImagen(images: any) {
-  const payload = Array.isArray(images) ? images : [];
-  const result: string[] = [];
-  for (const item of payload) {
-    const base64 = coerceBase64(item) || coerceBase64(item?.image) || coerceBase64(item?.data);
-    if (base64) {
-      result.push(base64);
-    }
-  }
-  return result;
-}
-
-function uniqueNonEmpty(images: string[]) {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const image of images) {
-    if (!image || seen.has(image)) continue;
-    seen.add(image);
-    result.push(image);
-    if (result.length >= MAX_VARIANTS) break;
-  }
-  return result;
+function stripDataUrl(image: string) {
+  if (typeof image !== 'string') return '';
+  const trimmed = image.trim();
+  if (!trimmed) return '';
+  if (!trimmed.startsWith('data:image')) return trimmed;
+  const [, base64] = trimmed.split(',', 2);
+  return base64 || '';
 }
 
 export async function POST(req: NextRequest) {
@@ -105,52 +68,48 @@ export async function POST(req: NextRequest) {
       ...payload,
       room: { ...payload.room, area: numericArea },
     };
-    const prompt = buildPrompt(normalizedPayload);
+    const promptBase = buildPrompt(normalizedPayload);
+    const prompts = generateRoomRefPrompts(promptBase, MAX_VARIANTS);
 
+    let planImage: InlineImage | undefined;
     if (payload.planFileId) {
       const planBinary = await getPlanBinary(payload.planFileId);
       if (!planBinary) {
         throw new Error('Файл планировки не найден');
       }
-
-      const out = await generateFromPlan({
-        planBytes: planBinary.buffer,
-        planMime: planBinary.mimeType || 'image/png',
-        area: normalizedPayload.room.area,
-        prompt,
-      });
-      const images = uniqueNonEmpty(extractFromVision(out.response));
-      if (!images.length) {
-        throw new Error('Gemini не вернул изображения (vision)');
-      }
-      return NextResponse.json({
-        images,
-        meta: {
-          via: 'vision',
-          model: out.model,
-          planAttached: true,
-        },
-      });
+      planImage = {
+        mimeType: planBinary.mimeType || 'image/png',
+        base64: planBinary.buffer.toString('base64'),
+      };
     }
 
-    const out = await generateImages({ prompt });
-    const images = uniqueNonEmpty(extractFromImagen(out.images));
-    if (!images.length) {
-      throw new Error('Gemini не вернул изображения (imagen)');
+    const images = await generateRoomRefs({
+      prompts,
+      planImage,
+      area: normalizedPayload.room.area,
+    });
+
+    const normalizedImages = images.map(stripDataUrl).filter(Boolean).slice(0, MAX_VARIANTS);
+    if (!normalizedImages.length) {
+      throw new Error('Gemini не вернул изображения');
     }
+
+    const via = planImage ? 'vision' : 'text';
+    const model = (planImage ? process.env.GEMINI_VISION_MODEL : process.env.GEMINI_IMAGE_MODEL) || 'gemini-2.0-flash';
+
     return NextResponse.json({
-      images,
+      images: normalizedImages,
       meta: {
-        via: 'imagen',
-        model: out.model,
-        planAttached: false,
+        via,
+        model: model.trim(),
+        planAttached: Boolean(planImage),
       },
     });
   } catch (error: any) {
     console.error('Error generating room refs:', error);
     return NextResponse.json(
       { error: error?.message ?? 'Не удалось сгенерировать изображения', stack: error?.stack },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

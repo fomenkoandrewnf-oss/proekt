@@ -1,106 +1,108 @@
-import { GoogleGenerativeAI } from '@google/genai';
+// lib/gemini.ts — SDK: @google/genai
+import { GoogleAI } from "@google/genai";
 
-const IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'imagen-3.0').trim();
-const VISION_MODEL = (process.env.GEMINI_VISION_MODEL || 'gemini-2.0-flash').trim();
-const MAX_VARIANTS = 4;
+const API_KEY = process.env.GOOGLE_API_KEY!;
+if (!API_KEY) throw new Error("Missing GOOGLE_API_KEY");
 
-let cachedClient: GoogleGenerativeAI | null = null;
-let cachedKey: string | null = null;
+const IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || "gemini-2.0-flash").trim();
+const VISION_MODEL = (process.env.GEMINI_VISION_MODEL || IMAGE_MODEL).trim();
 
-function resolveClient() {
-  const key = (process.env.GOOGLE_API_KEY || '').trim();
-  if (!key) {
-    throw new Error('Missing GOOGLE_API_KEY');
+const MAX_IMAGE_COUNT = 4;
+
+type InlineImage = { mimeType: string; base64: string };
+
+const client = new GoogleAI({ apiKey: API_KEY });
+
+// вытащить base64 PNG/JPEG из inlineData
+function extractInlineImages(resp: any): string[] {
+  const out: string[] = [];
+  const candidates = Array.isArray(resp?.candidates) ? resp.candidates : [];
+  for (const c of candidates) {
+    const parts = c?.content?.parts || c?.parts || [];
+    for (const p of parts) {
+      const b64 = p?.inlineData?.data;
+      const mt = p?.inlineData?.mimeType;
+      if (typeof b64 === "string" && b64 && mt?.startsWith("image/")) {
+        out.push(`data:${mt};base64,${b64}`);
+      }
+    }
   }
-  if (!cachedClient || cachedKey !== key) {
-    cachedClient = new GoogleGenerativeAI({ apiKey: key });
-    cachedKey = key;
+  return out;
+}
+
+function clamp(n: number) {
+  const v = Number.isFinite(n) ? Math.floor(n) : 1;
+  return Math.min(Math.max(v, 1), MAX_IMAGE_COUNT);
+}
+
+// --- 1) картинки по тексту (PNG через generateContent)
+export async function generateTextOnlyImages(prompts: string[]) {
+  const count = clamp(prompts.length);
+  const selected = prompts.slice(0, count);
+  const model = client.getGenerativeModel({ model: IMAGE_MODEL });
+
+  const images: string[] = [];
+  for (const prompt of selected) {
+    const r = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "image/png" },
+    });
+    const arr = extractInlineImages(r.response ?? r);
+    if (!arr.length) throw new Error("Gemini returned no image data");
+    images.push(arr[0]);
   }
-  return cachedClient;
+  return images;
 }
 
-function clampCount(n?: number) {
-  const numeric = Number.isFinite(n) ? Math.floor(n as number) : MAX_VARIANTS;
-  return Math.min(Math.max(numeric || 1, 1), MAX_VARIANTS);
-}
-
-function normalizeModelId(id: string) {
-  const trimmed = id.trim();
-  if (!trimmed) return id;
-  return trimmed.startsWith('models/') ? trimmed.slice('models/'.length) : trimmed;
-}
-
-type GenerateRefsInput = {
-  prompt: string;
-  n?: number;
-};
-
-type GenerateFromPlanInput = {
-  planBytes?: Buffer;
-  planMime?: string;
-  area?: number;
-  prompt: string;
-  n?: number;
-};
-
-export async function generateImages({ prompt, n = MAX_VARIANTS }: GenerateRefsInput) {
-  const client = resolveClient();
-  const modelName = normalizeModelId(IMAGE_MODEL);
-  const model = client.getGenerativeModel({ model: modelName });
-  const count = clampCount(n);
-
-  // @google/genai exposes generateImage for Imagen 3
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore -- generateImage is available for Imagen models at runtime
-  const response = await model.generateImage({ prompt, n: count, size: '1024x1024' });
-  const images = Array.isArray(response?.images) ? response.images : Array.isArray(response) ? response : [];
-
-  return { model: modelName, images };
-}
-
-export async function generateFromPlan({
-  planBytes,
-  planMime = 'image/png',
-  area,
-  prompt,
-  n = MAX_VARIANTS,
-}: GenerateFromPlanInput) {
-  const client = resolveClient();
-  const modelId = normalizeModelId(VISION_MODEL);
-  const model = client.getGenerativeModel({ model: modelId });
-  const count = clampCount(n);
+// --- 2) план + площадь (vision)
+export async function generateFromPlanAndArea(opts: {
+  prompt: string; plan?: InlineImage; area?: number; variants?: number;
+}) {
+  const { prompt, plan, area, variants = 4 } = opts;
+  const model = client.getGenerativeModel({ model: VISION_MODEL });
 
   const parts: any[] = [];
-
-  if (planBytes?.length) {
-    parts.push({
-      inlineData: {
-        data: planBytes.toString('base64'),
-        mimeType: planMime,
-      },
-    });
+  if (plan?.base64) {
+    parts.push({ inlineData: { mimeType: plan.mimeType || "image/png", data: plan.base64 } });
   }
-
   const visionPrompt = [
-    'Роль: Senior interior concept artist.',
-    count ? `Верни ${count} варианта (A–D).` : 'Верни 4 варианта (A–D).',
-    area ? `Целевая площадь помещения: ~${area} м² (допуск ±10%).` : '',
-    'Используй вложенную планировку для пропорций и расстановки мебели.',
-    'Соблюдай масштаб, ширину проходов и размещение дверных/оконных проёмов.',
-    'После изображения верни краткий layout JSON (позиции ключевых предметов).',
-    '',
-    'ТЗ:',
-    prompt,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
+    "Роль: Senior interior concept artist.",
+    area ? `Целевая площадь: ~${area} м² (±10%).` : "",
+    "Используй вложенную планировку для пропорций и расстановки.",
+    "Соблюдай проходы и масштаб.",
+    `Сгенерируй ${Math.min(Math.max(variants, 1), 4)} варианта (A–D).`,
+    "После изображений верни layout JSON (item, w, d, x, y, wall).",
+    "",
+    "ТЗ:", prompt,
+  ].filter(Boolean).join("\n");
   parts.push({ text: visionPrompt });
 
-  const response = await model.generateContent(parts);
+  const r = await model.generateContent({
+    contents: [{ role: "user", parts }],
+    generationConfig: { responseMimeType: "image/png" },
+  });
 
-  return { model: modelId, response: response.response ?? response };
+  const images = extractInlineImages(r.response ?? r);
+  if (!images.length) throw new Error("Gemini vision returned no image data");
+  return { images, raw: r.response };
 }
 
-export type GenerateImagesResult = Awaited<ReturnType<typeof generateImages>>;
-export type GenerateFromPlanResult = Awaited<ReturnType<typeof generateFromPlan>>;
+// --- 3) обёртка под /api/refs ---
+export async function generateRoomRefs(options: {
+  prompts: string[]; planImage?: InlineImage; area?: number;
+}) {
+  if (options.planImage) {
+    const first = await generateFromPlanAndArea({
+      prompt: options.prompts[0],
+      plan: options.planImage,
+      area: options.area,
+      variants: 1,
+    });
+    const restPrompts = options.prompts.slice(1);
+    const rest = restPrompts.length ? await generateTextOnlyImages(restPrompts) : [];
+    return [first.images[0], ...rest].slice(0, MAX_IMAGE_COUNT);
+  }
+  return await generateTextOnlyImages(options.prompts);
+}
+
+export type { InlineImage };
