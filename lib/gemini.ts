@@ -4,8 +4,13 @@ import { GoogleAI } from "@google/genai";
 const API_KEY = process.env.GOOGLE_API_KEY!;
 if (!API_KEY) throw new Error("Missing GOOGLE_API_KEY");
 
-const IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || "gemini-2.0-flash").trim();
-const VISION_MODEL = (process.env.GEMINI_VISION_MODEL || IMAGE_MODEL).trim();
+function normalizeModelId(value: string | undefined, fallback: string) {
+  const id = (value || fallback).trim();
+  return id.startsWith("models/") ? id.slice("models/".length) : id;
+}
+
+const IMAGE_MODEL = normalizeModelId(process.env.GEMINI_IMAGE_MODEL, "gemini-2.0-flash");
+const VISION_MODEL = normalizeModelId(process.env.GEMINI_VISION_MODEL, IMAGE_MODEL);
 
 const MAX_IMAGE_COUNT = 4;
 
