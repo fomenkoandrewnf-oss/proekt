@@ -1,21 +1,14 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import type { BriefFormData } from './types';
-
-export interface UploadedPlanMeta {
-  id: string;
-  originalName: string;
-  size: number;
-  mimeType: string;
-}
+import type { PlanInfo, TZForm } from './types';
 
 export interface StoredSubmission {
   id: string;
   createdAt: string;
-  form: BriefFormData;
+  form: TZForm;
   summary: string;
-  plan?: UploadedPlanMeta | null;
+  plan?: PlanInfo | null;
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -39,7 +32,7 @@ async function writeStore(records: StoredSubmission[]) {
   await writeFile(STORE_FILE, JSON.stringify(records, null, 2), 'utf-8');
 }
 
-export async function saveSubmission(form: BriefFormData, summary: string, plan?: UploadedPlanMeta | null) {
+export async function saveSubmission(form: TZForm, summary: string, plan?: PlanInfo | null) {
   const existing = await readStore();
   const record: StoredSubmission = {
     id: randomUUID(),

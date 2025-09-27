@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { BriefFormData } from './types';
+import type { Room, TZForm } from './types';
 
 function getClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -7,71 +7,87 @@ function getClient() {
   return new OpenAI({ apiKey });
 }
 
-function parseArea(value: number | '' | string | undefined) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined;
+function parseArea(area?: number) {
+  if (typeof area !== 'number') return undefined;
+  if (!Number.isFinite(area)) return undefined;
+  const rounded = Math.round(area * 10) / 10;
+  return rounded > 0 ? rounded : undefined;
 }
 
-export function buildSummaryPayload(form: BriefFormData) {
-  const rooms = Array.isArray(form.rooms)
-    ? form.rooms
-        .filter((room) => room?.name?.trim())
-        .map((room) => ({
-          name: room.name.trim(),
-          area: parseArea(room.area) ?? undefined,
-        }))
-    : [];
+function normalizeTotalArea(value?: number) {
+  const parsed = parseArea(value);
+  if (parsed === undefined) return undefined;
+  if (parsed < 10 || parsed > 1000) return undefined;
+  return parsed;
+}
 
-  const styleList = Array.isArray(form.styles) ? [...form.styles] : [];
-  if (form.customStyle?.trim()) {
-    styleList.push(form.customStyle.trim());
-  }
+function getTopRooms(rooms: Room[]) {
+  const withArea = rooms
+    .map((room) => ({
+      ...room,
+      area: parseArea(room.area) ?? 0,
+    }))
+    .filter((room) => room.area > 0);
+
+  const sorted = [...withArea].sort((a, b) => b.area - a.area);
+  return sorted.slice(0, 3).map((room) => ({ name: room.name || room.kind, area: room.area }));
+}
+
+function compactStyleTags(form: TZForm) {
+  const tags = Array.isArray(form.style?.tags) ? form.style.tags.filter(Boolean) : [];
+  if (form.style?.extra?.trim()) tags.push(form.style.extra.trim());
+  return tags.join(', ');
+}
+
+export function buildSummaryPayload(form: TZForm) {
+  const totalArea = normalizeTotalArea(form.totalArea);
+  const rooms = getTopRooms(Array.isArray(form.rooms) ? form.rooms : []);
+  const priorities = Array.isArray(form.priorities) ? form.priorities.filter(Boolean).slice(0, 3) : [];
 
   return {
-    housing_type: form.housingType || undefined,
-    finishing: form.finishing || undefined,
-    total_area: parseArea(form.totalArea) ?? undefined,
+    housingType: form.housingType,
+    finish: form.finish,
+    totalArea,
     rooms,
-    purpose: form.purpose || undefined,
-    family: form.family || undefined,
-    guests: form.guests || undefined,
-    pets: form.pets || undefined,
-    requirements: form.requirements || undefined,
-    replanning: form.housingType === 'новостройка' ? form.replanning || undefined : undefined,
-    manufacturers: form.housingType === 'новостройка' ? form.manufacturers || undefined : undefined,
-    ready_made_items: form.readyMade || undefined,
-    style: styleList.length ? styleList : undefined,
-    color_scheme: form.colorScheme || undefined,
-    wall_finish: form.wallFinish || undefined,
-    floor_finish: form.floorFinish || undefined,
-    doors: form.doors || undefined,
-    other_requirements: form.other || undefined,
-    dont_want: form.dontWant || undefined,
-    plan_file: form.plan
-      ? {
-          id: form.plan.id,
-          name: form.plan.originalName,
-          mime: form.plan.mimeType,
-        }
-      : undefined,
+    purpose: form.purpose,
+    style: compactStyleTags(form),
+    colors: form.style?.colors || undefined,
+    materials: {
+      walls: form.style?.walls || undefined,
+      floors: form.style?.floors || undefined,
+      doors: form.style?.doors || undefined,
+    },
+    important: form.requirements || undefined,
+    antiWants: form.antiWants || undefined,
+    priorities,
+    budget: form.budget || undefined,
   };
 }
 
-export async function summarizeBrief(form: BriefFormData) {
-  const system = `Ты — опытный дизайнер интерьеров и менеджер проектов. Получи структурированные данные клиента и подготовь краткое ТЗ до 1000 символов. Обязательно упомяни тип жилья, отделку, общую площадь, ключевые комнаты, стиль, материалы и особые требования. Пиши по делу, списками или компактными предложениями. Строго ограничь ответ 1000 символами.`;
+export async function summarizeBrief(form: TZForm) {
+  const systemPrompt =
+    'Ты — опытный дизайнер интерьеров. Составь единый абзац до 1000 символов по данным клиента.';
+
+  const summaryTemplate =
+    'Собери краткое ТЗ до 1000 символов на основе JSON. Держи структуру:\n' +
+    '[тип жилья], [общая площадь] м². Комнаты: [список с площадями].\n' +
+    'Назначение: [purpose]. Стиль: [style], цвета: [colors].\n' +
+    'Материалы: стены — [walls]; пол — [floors]; двери — [doors].\n' +
+    'Важно: [important]; не хотим: [antiWants].\n' +
+    'Приоритеты: [priorities]. Бюджет: [budget].\n' +
+    'Пиши цельно, без маркированных списков.';
 
   const payload = buildSummaryPayload(form);
-  const user = JSON.stringify(payload, null, 2);
+  const user = JSON.stringify({ template: summaryTemplate, data: payload }, null, 2);
 
   const client = getClient();
   const res = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: user },
     ],
-    temperature: 0.4,
+    temperature: 0.3,
   });
 
   const text = (res.choices[0]?.message?.content ?? '').trim();

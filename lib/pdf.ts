@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import type { BriefFormData } from './types';
+import type { Room, TZForm } from './types';
 
 function writeHeading(doc: PDFDocument, text: string, level: 1 | 2 = 2) {
   const fontSize = level === 1 ? 18 : 13;
@@ -24,17 +24,37 @@ function writeList(doc: PDFDocument, label: string, items: string[]) {
   });
 }
 
-function buildRoomLines(form: BriefFormData) {
-  return form.rooms
-    .filter((room) => room.name.trim())
+function parseArea(area?: number) {
+  if (typeof area !== 'number') return undefined;
+  if (!Number.isFinite(area)) return undefined;
+  return area > 0 ? area : undefined;
+}
+
+function buildRoomLines(rooms: Room[]) {
+  return rooms
+    .filter((room) => parseArea(room.area))
     .map((room) => {
-      const areaValue = Number(room.area);
-      const area = Number.isFinite(areaValue) && areaValue > 0 ? `${areaValue} м²` : 'площадь не указана';
-      return `${room.name.trim()} — ${area}`;
+      const area = parseArea(room.area);
+      const name = room.name?.trim() || room.kind;
+      return area ? `${name} — ${area} м²` : name;
     });
 }
 
-export async function buildPdf(summary: string, form: BriefFormData, title = 'Краткое ТЗ'): Promise<Uint8Array> {
+function compactStyleTags(form: TZForm) {
+  const tags = Array.isArray(form.style?.tags) ? form.style.tags.filter(Boolean) : [];
+  if (form.style?.extra?.trim()) tags.push(form.style.extra.trim());
+  return tags.join(', ');
+}
+
+function formatRecord(record?: Record<string, unknown>) {
+  if (!record) return '';
+  const entries = Object.entries(record)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}: ${String(value)}`);
+  return entries.join('; ');
+}
+
+export async function buildPdf(summary: string, form: TZForm, title = 'Краткое ТЗ'): Promise<Uint8Array> {
   return await new Promise((resolve) => {
     const doc = new PDFDocument({ size: 'A4', margin: 48 });
     const chunks: Buffer[] = [];
@@ -56,44 +76,56 @@ export async function buildPdf(summary: string, form: BriefFormData, title = 'К
     writeKV(doc, 'E-mail', form.contacts.email);
     writeKV(doc, 'Адрес', form.contacts.address);
 
-    writeHeading(doc, 'Основная информация');
+    writeHeading(doc, 'Общие параметры');
     writeKV(doc, 'Тип жилья', form.housingType);
-    writeKV(doc, 'Отделка', form.finishing);
-    const totalArea = Number(form.totalArea);
-    writeKV(doc, 'Общая площадь, м²', Number.isFinite(totalArea) && totalArea > 0 ? totalArea : '');
-    writeKV(doc, 'Назначение объекта', form.purpose);
-
-    writeList(doc, 'Помещения', buildRoomLines(form));
-
-    writeHeading(doc, 'Жители и гости');
-    writeKV(doc, 'Состав семьи', form.family);
-    writeKV(doc, 'Гости', form.guests);
-    writeKV(doc, 'Домашние животные', form.pets);
-
-    writeHeading(doc, 'Требования и ограничения');
-    writeKV(doc, 'Что предусмотреть', form.requirements);
-    if (form.housingType === 'новостройка') {
-      writeKV(doc, 'Перепланировка', form.replanning);
-      writeKV(doc, 'Страны-производители', form.manufacturers);
-    }
-    writeKV(doc, 'Готовые изделия / заказные позиции', form.readyMade);
-    writeKV(doc, 'Нельзя / не хотим', form.dontWant);
-    writeKV(doc, 'Прочие пожелания', form.other);
-
-    writeHeading(doc, 'Стили и отделка');
-    const styles = [...(Array.isArray(form.styles) ? form.styles.filter(Boolean) : [])];
-    if (form.customStyle?.trim()) styles.push(form.customStyle.trim());
-    writeKV(doc, 'Стиль', styles.join(', '));
-    writeKV(doc, 'Цветовая гамма', form.colorScheme);
-    writeKV(doc, 'Отделка стен', form.wallFinish);
-    writeKV(doc, 'Напольное покрытие', form.floorFinish);
-    writeKV(doc, 'Межкомнатные двери', form.doors);
+    writeKV(doc, 'Отделка', form.finish);
+    writeKV(doc, 'Общая площадь, м²', form.totalArea && form.totalArea > 0 ? form.totalArea : undefined);
+    writeKV(doc, 'Назначение', form.purpose);
+    writeList(doc, 'Помещения', buildRoomLines(form.rooms));
 
     if (form.plan) {
       writeHeading(doc, 'Планировка');
-      const sizeKb = `${Math.round(form.plan.size / 1024)} КБ`;
-      writeKV(doc, 'Файл', `${form.plan.originalName} (${sizeKb}, ${form.plan.mimeType})`);
+      writeKV(doc, 'Файл', form.plan.originalName);
+      const sizeKb = form.plan.size ? `${Math.round(form.plan.size / 1024)} КБ` : undefined;
+      writeKV(doc, 'Размер файла', sizeKb);
+      writeKV(doc, 'Формат', form.plan.mimeType);
+      writeKV(doc, 'Есть масштаб/размеры', form.plan.hasScale ? 'да' : 'нет');
+      writeKV(doc, 'Масштаб плана', form.plan.scaleNote);
     }
+
+    writeHeading(doc, 'Назначение и жители');
+    writeKV(doc, 'Состав семьи', form.family);
+    writeKV(doc, 'Гости', form.guests);
+    writeKV(doc, 'Домашние животные', form.pets);
+    writeKV(doc, 'Аллергии', form.allergies);
+    writeKV(doc, 'Приоритеты', Array.isArray(form.priorities) ? form.priorities.join(', ') : undefined);
+
+    writeHeading(doc, 'Требования');
+    writeKV(doc, 'Что предусмотреть', form.requirements);
+    if (form.housingType === 'новостройка') {
+      writeKV(doc, 'Перепланировка нужна', form.replanning?.needed ? 'да' : 'нет');
+      writeKV(doc, 'Перепланировка — детали', form.replanning?.details);
+    }
+    writeKV(doc, 'Страны / бренды', form.preferredCountries);
+    writeKV(doc, 'Готовые изделия vs заказ', form.readyVsCustom);
+    writeKV(doc, 'Что точно не хотим', form.antiWants);
+    writeKV(doc, 'Прочие пожелания', form.otherWishes);
+    writeKV(doc, 'Бюджет', form.budget);
+
+    writeHeading(doc, 'Стиль и отделка');
+    writeKV(doc, 'Стиль', compactStyleTags(form));
+    writeKV(doc, 'Цветовая гамма', form.style?.colors);
+    writeKV(doc, 'Отделка стен', form.style?.walls);
+    writeKV(doc, 'Напольное покрытие', form.style?.floors);
+    writeKV(doc, 'Межкомнатные двери', form.style?.doors);
+
+    writeHeading(doc, 'Детали (аккордеоны)');
+    writeKV(doc, 'Кухня', formatRecord(form.kitchen as Record<string, unknown> | undefined));
+    writeKV(doc, 'Санузлы', formatRecord(form.bathrooms as Record<string, unknown> | undefined));
+    writeKV(doc, 'Хранение', form.storage);
+    writeKV(doc, 'Свет', form.lighting);
+    writeKV(doc, 'Окна и шторы', form.windows);
+    writeKV(doc, 'Умный дом и климат', form.smartHome);
 
     doc.end();
   });

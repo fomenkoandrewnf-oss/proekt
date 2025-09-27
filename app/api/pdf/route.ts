@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildPdf } from '@/lib/pdf';
-import type { BriefFormData } from '@/lib/types';
+import type { TZForm } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   if (!form) return NextResponse.json({ error: 'No form data' }, { status: 400 });
 
   try {
-    const buffer = await buildPdf(summary, form as BriefFormData, title ?? 'Краткое ТЗ');
+    const buffer = await buildPdf(summary, form as TZForm, title ?? 'Краткое ТЗ');
     return new NextResponse(buffer as any, {
       status: 200,
       headers: {

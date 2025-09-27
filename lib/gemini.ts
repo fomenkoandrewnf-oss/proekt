@@ -3,14 +3,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image-preview';
 const MAX_IMAGE_COUNT = 4;
 
-export function generateRoomRefPrompts(prompt: string, count: number) {
-  const numericCount = Number.isFinite(count) ? Math.floor(count) : 1;
-  const limitedCount = Math.min(Math.max(numericCount, 1), MAX_IMAGE_COUNT);
-  return Array.from({ length: limitedCount }, () => prompt);
-}
+type InlineImage = { mimeType: string; base64: string };
 
-type GenerativeAIClient = InstanceType<typeof GoogleGenerativeAI>;
-type GenerativeModel = ReturnType<GenerativeAIClient['getGenerativeModel']>;
+type GenerateRefsOptions = {
+  prompts: string[];
+  planImage?: InlineImage;
+  apiKeyOverride?: string;
+};
 
 function normalizeModelId(modelId?: string) {
   const trimmed = modelId?.trim();
@@ -26,6 +25,11 @@ function resolveApiKey(apiKeyOverride?: string) {
     throw new Error('Missing GEMINI_API_KEY');
   }
   return key;
+}
+
+function clampCount(count: number) {
+  const numeric = Number.isFinite(count) ? Math.floor(count) : 1;
+  return Math.min(Math.max(numeric, 1), MAX_IMAGE_COUNT);
 }
 
 function extractInlineData(response: any) {
@@ -46,23 +50,34 @@ function extractInlineData(response: any) {
   return undefined;
 }
 
-async function generateImage(model: GenerativeModel, prompt: string) {
+async function generateSingleImage(model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>, prompt: string, image?: InlineImage) {
+  const contents: any[] = [
+    {
+      role: 'user',
+      parts: [
+        ...(image
+          ? [
+              {
+                inlineData: {
+                  mimeType: image.mimeType,
+                  data: image.base64,
+                },
+              },
+            ]
+          : []),
+        { text: prompt },
+      ],
+    },
+  ];
+
   const result = await model.generateContent({
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ],
+    contents,
     generationConfig: { responseMimeType: 'image/png' },
   });
 
   const response = result?.response ?? result;
   const base64 = extractInlineData(response);
-
-  if (base64) {
-    return base64;
-  }
+  if (base64) return base64;
 
   const blockReason = response?.promptFeedback?.blockReason;
   if (blockReason) {
@@ -72,15 +87,21 @@ async function generateImage(model: GenerativeModel, prompt: string) {
   throw new Error('Gemini image generation returned no image data');
 }
 
-export async function generateRoomRefs(prompt: string, count = 4, apiKeyOverride?: string) {
-  const apiKey = resolveApiKey(apiKeyOverride);
-  const modelId = normalizeModelId(process.env.GEMINI_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL);
-  const prompts = generateRoomRefPrompts(prompt, count);
+export async function generateRoomRefs(options: GenerateRefsOptions) {
+  const prompts = Array.isArray(options.prompts) ? options.prompts : [];
+  if (!prompts.length) {
+    throw new Error('No prompts provided for Gemini');
+  }
+
+  const count = clampCount(prompts.length);
+  const apiKey = resolveApiKey(options.apiKeyOverride);
+  const modelId = normalizeModelId(process.env.GEMINI_IMAGE_MODEL);
 
   const client = new GoogleGenerativeAI(apiKey);
   const model = client.getGenerativeModel({ model: modelId });
 
-  const images = await Promise.all(prompts.map((promptText) => generateImage(model, promptText)));
+  const selectedPrompts = prompts.slice(0, count);
+  const images = await Promise.all(selectedPrompts.map((prompt) => generateSingleImage(model, prompt, options.planImage)));
 
   return images;
 }
