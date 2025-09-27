@@ -1,107 +1,106 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/genai';
 
-const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image-preview';
-const MAX_IMAGE_COUNT = 4;
+const IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || 'imagen-3.0').trim();
+const VISION_MODEL = (process.env.GEMINI_VISION_MODEL || 'gemini-2.0-flash').trim();
+const MAX_VARIANTS = 4;
 
-type InlineImage = { mimeType: string; base64: string };
+let cachedClient: GoogleGenerativeAI | null = null;
+let cachedKey: string | null = null;
 
-type GenerateRefsOptions = {
-  prompts: string[];
-  planImage?: InlineImage;
-  apiKeyOverride?: string;
+function resolveClient() {
+  const key = (process.env.GOOGLE_API_KEY || '').trim();
+  if (!key) {
+    throw new Error('Missing GOOGLE_API_KEY');
+  }
+  if (!cachedClient || cachedKey !== key) {
+    cachedClient = new GoogleGenerativeAI({ apiKey: key });
+    cachedKey = key;
+  }
+  return cachedClient;
+}
+
+function clampCount(n?: number) {
+  const numeric = Number.isFinite(n) ? Math.floor(n as number) : MAX_VARIANTS;
+  return Math.min(Math.max(numeric || 1, 1), MAX_VARIANTS);
+}
+
+function normalizeModelId(id: string) {
+  const trimmed = id.trim();
+  if (!trimmed) return id;
+  return trimmed.startsWith('models/') ? trimmed.slice('models/'.length) : trimmed;
+}
+
+type GenerateRefsInput = {
+  prompt: string;
+  n?: number;
 };
 
-function normalizeModelId(modelId?: string) {
-  const trimmed = modelId?.trim();
-  if (!trimmed) {
-    return `models/${DEFAULT_IMAGE_MODEL}`;
-  }
-  return trimmed.startsWith('models/') ? trimmed : `models/${trimmed}`;
+type GenerateFromPlanInput = {
+  planBytes?: Buffer;
+  planMime?: string;
+  area?: number;
+  prompt: string;
+  n?: number;
+};
+
+export async function generateImages({ prompt, n = MAX_VARIANTS }: GenerateRefsInput) {
+  const client = resolveClient();
+  const modelName = normalizeModelId(IMAGE_MODEL);
+  const model = client.getGenerativeModel({ model: modelName });
+  const count = clampCount(n);
+
+  // @google/genai exposes generateImage for Imagen 3
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore -- generateImage is available for Imagen models at runtime
+  const response = await model.generateImage({ prompt, n: count, size: '1024x1024' });
+  const images = Array.isArray(response?.images) ? response.images : Array.isArray(response) ? response : [];
+
+  return { model: modelName, images };
 }
 
-function resolveApiKey(apiKeyOverride?: string) {
-  const key = (apiKeyOverride ?? process.env.GEMINI_API_KEY ?? '').trim();
-  if (!key) {
-    throw new Error('Missing GEMINI_API_KEY');
-  }
-  return key;
-}
-
-function clampCount(count: number) {
-  const numeric = Number.isFinite(count) ? Math.floor(count) : 1;
-  return Math.min(Math.max(numeric, 1), MAX_IMAGE_COUNT);
-}
-
-function extractInlineData(response: any) {
-  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
-  for (const candidate of candidates) {
-    const parts = Array.isArray(candidate?.content?.parts)
-      ? candidate.content.parts
-      : Array.isArray(candidate?.parts)
-      ? candidate.parts
-      : [];
-    for (const part of parts) {
-      const data = part?.inlineData?.data;
-      if (typeof data === 'string' && data.trim()) {
-        return data;
-      }
-    }
-  }
-  return undefined;
-}
-
-async function generateSingleImage(model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>, prompt: string, image?: InlineImage) {
-  const contents: any[] = [
-    {
-      role: 'user',
-      parts: [
-        ...(image
-          ? [
-              {
-                inlineData: {
-                  mimeType: image.mimeType,
-                  data: image.base64,
-                },
-              },
-            ]
-          : []),
-        { text: prompt },
-      ],
-    },
-  ];
-
-  const result = await model.generateContent({
-    contents,
-    generationConfig: { responseMimeType: 'image/png' },
-  });
-
-  const response = result?.response ?? result;
-  const base64 = extractInlineData(response);
-  if (base64) return base64;
-
-  const blockReason = response?.promptFeedback?.blockReason;
-  if (blockReason) {
-    throw new Error(`Gemini blocked the request: ${blockReason}`);
-  }
-
-  throw new Error('Gemini image generation returned no image data');
-}
-
-export async function generateRoomRefs(options: GenerateRefsOptions) {
-  const prompts = Array.isArray(options.prompts) ? options.prompts : [];
-  if (!prompts.length) {
-    throw new Error('No prompts provided for Gemini');
-  }
-
-  const count = clampCount(prompts.length);
-  const apiKey = resolveApiKey(options.apiKeyOverride);
-  const modelId = normalizeModelId(process.env.GEMINI_IMAGE_MODEL);
-
-  const client = new GoogleGenerativeAI(apiKey);
+export async function generateFromPlan({
+  planBytes,
+  planMime = 'image/png',
+  area,
+  prompt,
+  n = MAX_VARIANTS,
+}: GenerateFromPlanInput) {
+  const client = resolveClient();
+  const modelId = normalizeModelId(VISION_MODEL);
   const model = client.getGenerativeModel({ model: modelId });
+  const count = clampCount(n);
 
-  const selectedPrompts = prompts.slice(0, count);
-  const images = await Promise.all(selectedPrompts.map((prompt) => generateSingleImage(model, prompt, options.planImage)));
+  const parts: any[] = [];
 
-  return images;
+  if (planBytes?.length) {
+    parts.push({
+      inlineData: {
+        data: planBytes.toString('base64'),
+        mimeType: planMime,
+      },
+    });
+  }
+
+  const visionPrompt = [
+    'Роль: Senior interior concept artist.',
+    count ? `Верни ${count} варианта (A–D).` : 'Верни 4 варианта (A–D).',
+    area ? `Целевая площадь помещения: ~${area} м² (допуск ±10%).` : '',
+    'Используй вложенную планировку для пропорций и расстановки мебели.',
+    'Соблюдай масштаб, ширину проходов и размещение дверных/оконных проёмов.',
+    'После изображения верни краткий layout JSON (позиции ключевых предметов).',
+    '',
+    'ТЗ:',
+    prompt,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  parts.push({ text: visionPrompt });
+
+  const response = await model.generateContent(parts);
+
+  return { model: modelId, response: response.response ?? response };
 }
+
+export type GenerateImagesResult = Awaited<ReturnType<typeof generateImages>>;
+export type GenerateFromPlanResult = Awaited<ReturnType<typeof generateFromPlan>>;

@@ -51,6 +51,18 @@ export async function readPlanAsBase64(id: string) {
   return buffer.toString('base64');
 }
 
+export async function readPlanBuffer(id: string) {
+  const filePath = await resolvePlanPath(id);
+  return readFile(filePath);
+}
+
+export async function getPlanBinary(id: string) {
+  const meta = await getPlanMeta(id);
+  if (!meta) return null;
+  const buffer = await readPlanBuffer(id);
+  return { buffer, mimeType: meta.mimeType };
+}
+
 export async function getPlanStats(id: string) {
   const filePath = await resolvePlanPath(id);
   const fileStat = await stat(filePath);
