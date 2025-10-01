@@ -1,6 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'fs/promises';
 import { createReadStream } from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import type { UploadedPlanRecord } from './types';
 
 export const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
@@ -71,4 +72,22 @@ export async function getPlanStats(id: string) {
 
 export function streamPlan(id: string) {
   return createReadStream(path.join(UPLOAD_DIR, id));
+}
+
+export async function preprocessPlanForGenAI(
+  input: Buffer,
+): Promise<{ base64: string; mimeType: string; bytes: number }> {
+  let img = sharp(input, { limitInputPixels: 268402689 });
+  const meta = await img.metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (Math.max(w, h) > 2048) {
+    img = img.resize({
+      width: w >= h ? 2048 : undefined,
+      height: h > w ? 2048 : undefined,
+      fit: 'inside',
+    });
+  }
+  const out = await img.png({ compressionLevel: 9 }).toBuffer();
+  return { base64: out.toString('base64'), mimeType: 'image/png', bytes: out.length };
 }

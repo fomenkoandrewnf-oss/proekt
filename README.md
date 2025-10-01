@@ -8,12 +8,13 @@
    ```bash
    npm install
    ```
-2. **Переменные окружения** – создайте `.env.local`:
+2. **Переменные окружения** – создайте `.env.local` (образец в `.env.local.example`):
    ```env
    OPENAI_API_KEY=sk-...
-   GOOGLE_API_KEY=...
-   GEMINI_IMAGE_MODEL=gemini-2.0-flash # можно не указывать
-   GEMINI_VISION_MODEL=gemini-2.0-flash # по умолчанию такая же
+   GEMINI_API_KEY=AIza...
+   # опционально: GOOGLE_API_KEY=AIza... (если хотите использовать сервисный ключ)
+   GEMINI_IMAGE_MODEL=gemini-2.5-flash-image-preview
+   GEMINI_VISION_MODEL=gemini-2.5-flash-image-preview
    ```
 3. **Запуск разработки**
    ```bash
@@ -27,7 +28,7 @@
 
 ```bash
 npm remove @google/generative-ai
-npm i @google/genai
+npm i @google/genai sharp
 rm -rf .next node_modules package-lock.json
 npm i
 ```
@@ -50,7 +51,7 @@ npm i
 | `/api/brief` | POST | Принимает `TZForm`, возвращает `{ summary }`. Сводка формируется по шаблону из ТЗ и сохраняется в `data/submissions.json`. |
 | `/api/plan-upload` | POST | Принимает файл планировки (`jpg/png/pdf`). Возвращает `{ fileId, previewUrl, originalName, size, mimeType }` и сохраняет метаданные в `uploads/plans.json`. |
 | `/api/plans/[id]` | GET | Отдаёт сохранённую планировку для превью/скачивания. |
-| `/api/refs` | POST | Принимает объект комнаты (тип, площадь, заметки), стиль, материалы и ограничения. Возвращает до 4 PNG (base64) и метаданные о модели/режиме (vision или text). |
+| `/api/refs` | POST | Принимает объект комнаты (тип, площадь, заметки), стиль, материалы и ограничения. Возвращает до 4 PNG (data:image/png;base64,…) и метаданные о модели/режиме (vision или text). |
 | `/api/docx` / `/api/pdf` | POST | Принимают `{ summary, form }` и отдают файлы с полным содержимым анкеты. |
 
 ## Структура данных
@@ -89,9 +90,10 @@ export interface TZForm {
 ## Генерация референсов
 
 - Для выбранной комнаты строится промпт (варианты A–D) с учётом площади, стиля, материалов, ограничений и заметок.
-- Если загружен план, в запрос к Gemini добавляется изображение планировки и используется vision-модель (по умолчанию `gemini-2.0-flash`).
-- Для обоих режимов используется SDK `@google/genai` (модели по умолчанию `gemini-2.0-flash`).
-- Если план загружен, первый вариант генерируется с учётом изображения планировки и площади (vision); остальные формируются по текстовому описанию.
+- Используется SDK `@google/genai` и модель `gemini-2.5-flash-image-preview` как для текстовой, так и для vision-генерации. Идентификаторы можно переопределить в `.env.local`.
+- Планировки предварительно сжимаются через `sharp`: PNG, максимальная сторона 2048 px, размер файла обычно ≤ 5 МБ.
+- При наличии плана первый вариант генерируется с изображением планировки и площадью (vision), остальные формируются по текстовому описанию.
+- Запросы к Gemini повторяются до трёх раз при сетевых ошибках (`ECONNRESET`, timeouts, 5xx). При отсутствии изображения в логах выводится `blockReason` и первые символы текстового ответа.
 - Без планировки создаются до четырёх PNG только по тексту.
 
 ## Экспорт документов
@@ -106,4 +108,13 @@ export interface TZForm {
 
 - Каталоги `uploads/` и `data/` игнорируются git и создаются автоматически.
 - Обработка ошибок в API логирует стек, чтобы было проще отлавливать проблемы на фронте.
-- Зависимости `docx`, `pdfkit`, `@google/genai` и `openai` требуются на серверной стороне; убедитесь, что у вас есть доступ к npm registry.
+- Зависимости `docx`, `pdfkit`, `@google/genai`, `sharp` и `openai` требуются на серверной стороне; убедитесь, что у вас есть доступ к npm registry.
+- Для проверки доступа к Gemini выполните:
+  ```bash
+  curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -H "x-goog-api-key: $GEMINI_API_KEY" \
+    https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent \
+    -d '{"contents":[{"role":"user","parts":[{"text":"ping"}]}]}'
+  ```
+  Если получите ошибку `FAILED_PRECONDITION: User location is not supported`, задеплойте бэкенд в регионе США/Европы (например, `vercel.json` с `{"regions":["iad1"]}`).

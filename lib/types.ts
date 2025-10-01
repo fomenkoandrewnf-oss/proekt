@@ -100,4 +100,5 @@ export interface RoomRefRequest {
   style: Pick<TZForm['style'], 'tags' | 'extra' | 'colors'>;
   materials: { walls?: string; floors?: string; doors?: string };
   constraints: { housingType: HousingType; finish: FinishType; hasScale?: boolean; scaleNote?: string };
+  count?: number;
 }

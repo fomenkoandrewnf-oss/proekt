@@ -364,7 +364,22 @@ const updateSimpleSection = (section: 'storage' | 'lighting' | 'windows' | 'smar
         },
       };
       const { images } = await postJSON<{ images: string[] }>('/api/refs', payload);
-      setImages(images);
+      const normalized = images
+        .map((item) => {
+          if (typeof item !== 'string') return '';
+          const trimmed = item.trim();
+          if (!trimmed) return '';
+          if (trimmed.startsWith('data:image')) {
+            const [, base64] = trimmed.split(',', 2);
+            return base64 || '';
+          }
+          return trimmed;
+        })
+        .filter(Boolean);
+      if (!normalized.length) {
+        throw new Error('Gemini не вернул изображения');
+      }
+      setImages(normalized);
       setSelectedImageIndex(0);
     } catch (error) {
       console.error('Refs generation error:', error);
