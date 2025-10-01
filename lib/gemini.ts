@@ -63,23 +63,59 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3, backoff = 600) {
   throw err;
 }
 
+function buildImageOnlyPrompt(userPrompt: string) {
+  return [
+    "You are an image renderer.",
+    "TASK: Generate ONE photorealistic reference IMAGE only.",
+    "FORMAT: Return only an IMAGE (inlineData), no text, no captions.",
+    "SIZE: square aspect (around 1024).",
+    "CONTENT:",
+    userPrompt,
+  ].join("\n");
+}
+
 /** Текст → изображения (image-preview выдаёт inlineData без доп. конфигов) */
 export async function generateTextOnlyImages(prompts: string[]) {
   const selected = prompts.slice(0, clamp(prompts.length));
   const images: string[] = [];
 
-  for (const prompt of selected) {
-    const res = await withRetry(() =>
-      ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-      }),
-    );
-    const arr = extractInlineImages(res);
-    if (!arr.length) {
-      throw new Error(`Gemini не вернул изображение: ${explainNoImage(res) || "no inlineData"}`);
+  for (const original of selected) {
+    const tries = [
+      buildImageOnlyPrompt(original),
+      buildImageOnlyPrompt(`Return an image file only. No text. ${original}`),
+    ];
+
+    let got: string | null = null;
+    let lastDiag = "";
+
+    for (const p of tries) {
+      const res = await withRetry(() =>
+        ai.models.generateContent({
+          model: IMAGE_MODEL,
+          contents: [{ role: "user", parts: [{ text: p }] }],
+        }),
+      );
+
+      const arr = extractInlineImages(res);
+      if (arr.length) {
+        got = arr[0];
+        break;
+      }
+
+      const txt = res?.candidates?.[0]?.content?.parts
+        ?.map?.((pp: any) => pp?.text)
+        ?.filter(Boolean)
+        ?.join("\n");
+      const block = res?.promptFeedback?.blockReason;
+      lastDiag = [block ? `block=${block}` : "", txt ? `text="${txt.slice(0, 160)}..."` : ""]
+        .filter(Boolean)
+        .join(" | ");
     }
-    images.push(arr[0]);
+
+    if (!got) {
+      throw new Error(`Gemini не вернул изображение: ${lastDiag || "no inlineData"}`);
+    }
+    images.push(got);
   }
   return images;
 }
